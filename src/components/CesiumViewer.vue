@@ -809,12 +809,24 @@ export default {
             // update wind arrow
             this.updateWindArrowPosition()
             // update gps
-            const pos = this.model?.position?.getValue(this.viewer.clock.currentTime)
-            if (pos) {
-                const carto = Cartographic.fromCartesian(pos)
-                this.currentGps.lat = carto.latitude * (180 / Math.PI)
-                this.currentGps.lon = carto.longitude * (180 / Math.PI)
-                this.currentGps.alt = carto.height
+            const gpsData = this.state.messages['GPS[0]'] || this.state.messages.GPS
+            if (gpsData && gpsData.time_boot_ms && gpsData.Lat && gpsData.Lng) {
+                const currentMs = this.lastEmitted
+                const times = gpsData.time_boot_ms
+
+                let closestIndex = 0
+                let minDiff = Infinity
+                for (let i = 0; i < times.length; i++) {
+                    const diff = Math.abs(times[i] - currentMs)
+                    if (diff < minDiff) {
+                        minDiff = diff
+                        closestIndex = i
+                    }
+                }
+
+                this.currentGps.lat = gpsData.Lat[closestIndex] * 1e-7
+                this.currentGps.lon = gpsData.Lng[closestIndex] * 1e-7
+                this.currentGps.alt = gpsData.Alt ? gpsData.Alt[closestIndex] : 0
             }
         },
 
@@ -1386,8 +1398,10 @@ export default {
                         outlineWidth: 3
                     },
                     description: `
-                        <b>GPS Coordinates (WGS84):</b>
-                        <br>${lat.toFixed(6)}, ${lon.toFixed(6)}<br>
+                        <div style="color: purple; font-weight: bold;">
+                            <b>GPS Coordinates:</b>
+                            <br>${lat.toFixed(6)}, ${lon.toFixed(6)}<br>
+                        </div>
                       `
                 })
             }
@@ -1755,7 +1769,7 @@ export default {
           right: 10px;
           width: 140px;
           background: rgba(0, 0, 0, 0.7);
-          color: #eee;
+          color: #A020F0;
           font-family: 'Montserrat', sans-serif;
           font-size: 9pt;
           border-radius: 8px;
