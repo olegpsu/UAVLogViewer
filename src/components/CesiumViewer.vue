@@ -1,22 +1,44 @@
 <template>
-    <div id="wrapper">
-        <div id="toolbar">
-          <table class="infoPanel">
-                <select class="color-coding-select" v-model="selectedColorCoder" v-on:change="updateColor">
-                    <option :key="key"  :value="key" v-for="(value, key) in useableColorCoders">
-                        {{ key }}
-                    </option>
-                </select>
-              <tbody>
-                <tr v-bind:key="mode[0]" v-for="mode in colorCodeLegend">
-                    <td class="mode" v-bind:style="{ color: mode.color } ">{{ mode.name }}</td>
-                </tr>
-              </tbody>
-            </table>
-            <CesiumSettingsWidget />
-        </div>
-        <div id="cesiumContainer"></div>
+  <div id="wrapper">
+    <div id="toolbar">
+      <table class="infoPanel">
+        <select class="color-coding-select" v-model="selectedColorCoder" v-on:change="updateColor">
+          <option :key="key"  :value="key" v-for="(value, key) in useableColorCoders">
+            {{ key }}
+          </option>
+        </select>
+        <tbody>
+          <tr v-bind:key="mode[0]" v-for="mode in colorCodeLegend">
+            <td class="mode" v-bind:style="{ color: mode.color } ">{{ mode.name }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <CesiumSettingsWidget />
     </div>
+
+    <div id="cesiumContainer"></div>
+
+    <div id="wind-panel">
+      <div class="wind-panel-header">Wind properties</div>
+      <div class="wind-panel-body">
+        <div class="wind-arrow-container">
+          <div id="wind-arrow" :style="windArrowStyle"></div>
+        </div>
+        <div v-if="windVector">
+          <p><strong>Wind direction:</strong> {{ windVector.windDirection?.toFixed(1) ?? 'N/A' }}°</p>
+          <p><strong>Wind speed:</strong> {{ windVector.windSpeed?.toFixed(2) ?? 'N/A' }} m/s</p>
+          <p><strong>VWE:</strong> {{ windVector.vwe?.toFixed(1) ?? 'N/A' }} m/s</p>
+          <p><strong>VWN:</strong> {{ windVector.vwn?.toFixed(1) ?? 'N/A' }} m/s</p>
+        </div>
+      </div>
+    </div>
+    <div id="gps-panel">
+      <div class="gps-panel-header">GPS properties</div>
+      <div class="gps-panel-body" v-if="currentGps">
+        <p><strong>GPS:</strong> {{ currentGps.lat.toFixed(6) }},{{ currentGps.lon.toFixed(6) }}</p>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script>
@@ -110,7 +132,9 @@ export default {
             startTimeMs: 0,
             lastEmitted: 0,
             colorCoder: null,
-            selectedColorCoder: 'Mode'
+            selectedColorCoder: 'Mode',
+            windVector: { vwe: 0, vwn: 0, windDirection: 0, windSpeed: 0 },
+            currentGps: { lat: 0, lon: 0, alt: 0 }
         }
     },
     components: {
@@ -124,6 +148,8 @@ export default {
         this.waypoints = null // Autopilot Waypoints
         this.trajectory = null // GPS trajectory (in degrees)
         this.correctedTrajectory = [] // GPS trajectory (Cartographic array)
+        this.windSampledProperty = new SampledProperty(Cartesian3) // x = VWE, y = VWN
+        this.windMetaSampledProperty = new SampledProperty(Cartesian3) // x = windSpeed, y = windDirection
 
         // Link time with plot updates
         this.$eventHub.$on('hoveredTime', this.showAttitude)
@@ -136,6 +162,14 @@ export default {
     mounted () {
         // create eniro, statkart, and openseamap providers
         this.asyncSetup()
+        this.$nextTick(() => {
+            if (this.viewer && this.viewer.scene) {
+                this.viewer.scene.postRender.addEventListener(this.updateWindArrowPosition)
+                console.log('Wind Arrow update function attached.')
+            } else {
+                console.error('Cesium viewer not initialized properly.')
+            }
+        })
     },
     methods: {
         async asyncSetup () {
@@ -156,7 +190,6 @@ export default {
                 this.trajectory = this.viewer.entities.add(new Entity())
                 this.trajectoryUpdateTimeout = null
                 this.viewer.scene.globe.enableLighting = true
-                this.viewer.scene.postRender.addEventListener(this.onFrameUpdate)
                 this.viewer.scene.postRender.addEventListener(this.onFrameUpdate)
                 this.viewer.scene.morphComplete.addEventListener(
                     () => {
@@ -377,10 +410,12 @@ export default {
             this.state.heightOffset = 0
             this.state.heightOffset = updatedPositions[0].height
             this.processTrajectory(this.state.currentTrajectory)
+            this.processWindData()
             this.addModel()
             this.updateAndPlotTrajectory()
             await this.plotMission(this.state.mission)
             this.plotFences(this.state.fences)
+            this.plotGpsPoints()
             document.addEventListener('setzoom', this.onTimelineZoom)
             this.$eventHub.$on('rangeChanged', this.onRangeChanged)
             /*            if (this.$route.query.hasOwnProperty('cam')) {
@@ -756,6 +791,31 @@ export default {
                 this.viewer.clock.currentTime > this.timelineStop) {
                 this.viewer.clock.currentTime = this.timelineStart.clone()
             }
+            // update wind params
+            const windVector = this.windSampledProperty.getValue(this.viewer.clock.currentTime)
+            const windMeta = this.windMetaSampledProperty.getValue(this.viewer.clock.currentTime)
+
+            // console.log('Wind Vector:', windVector)
+            // console.log('Wind Meta:', windMeta)
+
+            if (windVector && windMeta) {
+                this.$set(this.windVector, 'vwe', windVector.x)
+                this.$set(this.windVector, 'vwn', windVector.y)
+                this.$set(this.windVector, 'windDirection', windMeta.y)
+                this.$set(this.windVector, 'windSpeed', windMeta.x)
+            } else {
+                console.warn('No wind data available!')
+            }
+            // update wind arrow
+            this.updateWindArrowPosition()
+            // update gps
+            const pos = this.model?.position?.getValue(this.viewer.clock.currentTime)
+            if (pos) {
+                const carto = Cartographic.fromCartesian(pos)
+                this.currentGps.lat = carto.latitude * (180 / Math.PI)
+                this.currentGps.lon = carto.longitude * (180 / Math.PI)
+                this.currentGps.alt = carto.height
+            }
         },
 
         cesiumTimeToMs (time) {
@@ -835,6 +895,31 @@ export default {
                     this.model.position = this.sampledPos
                 }
             }
+        },
+        processWindData () {
+            if (!this.state.windData || this.state.windData.vectors.length === 0) {
+                console.warn('Wind data are empty!')
+                return
+            }
+
+            // remove old data
+            this.windSampledProperty = new SampledProperty(Cartesian3)
+            this.windMetaSampledProperty = new SampledProperty(Cartesian3)
+
+            this.startTimeMsWind = getMinTime(this.state.windData.vectors)
+
+            // wind data processing
+            for (const vector of this.state.windData.vectors) {
+                // eslint-disable-next-line max-len
+                const time = JulianDate.addSeconds(this.start, (vector[3] - this.startTimeMsWind) / 1000, new JulianDate())
+                const windVector = new Cartesian3(vector[0], vector[1], 0) // VWE, VWN
+                // eslint-disable-next-line max-len
+                const windMeta = new Cartesian3(vector[4], vector[2], 0) // windSpeed, windDirection
+
+                this.windSampledProperty.addSample(time, windVector)
+                this.windMetaSampledProperty.addSample(time, windMeta)
+            }
+            console.log('Processed wind date:', this.windSampledProperty, this.windMetaSampledProperty)
         },
         aggregateDepth (bathymetry, positions) {
             const positionsWithDepth = []
@@ -1125,6 +1210,7 @@ export default {
                     })
                 }, 3000)
             }
+            this.updateWindArrowPosition()
         },
         async updateAndPlotTrajectory () {
             if (!this.colorCoder) {
@@ -1271,6 +1357,43 @@ export default {
                 })
             }
         },
+        plotGpsPoints () {
+            const gpsData = this.state.messages['GPS[0]'] || this.state.messages.GPS
+            if (!gpsData || !gpsData.Lat || !gpsData.Lng) {
+                console.warn('GPS data not found!')
+                return
+            }
+
+            const latitudes = gpsData.Lat
+            const longitudes = gpsData.Lng
+            const altitudes = gpsData.Alt
+
+            const gpsEntityCollection = this.viewer.entities.add(new Entity({ name: 'GPS Points' }))
+
+            for (let i = 0; i < latitudes.length; i++) {
+                const lat = latitudes[i] * 1e-7
+                const lon = longitudes[i] * 1e-7
+                const alt = altitudes[i] || 0
+
+                const pos = Cartesian3.fromDegrees(lon, lat, alt)
+                this.viewer.entities.add({
+                    parent: gpsEntityCollection,
+                    position: pos,
+                    point: {
+                        pixelSize: 2,
+                        color: Color.PURPLE,
+                        outlineColor: Color.PURPLE,
+                        outlineWidth: 3
+                    },
+                    description: `
+                        <b>GPS Coordinates (WGS84):</b>
+                        <br>${lat.toFixed(6)}, ${lon.toFixed(6)}<br>
+                      `
+                })
+            }
+
+            this.viewer.scene.requestRender()
+        },
         plotFences (fencesList) {
             this.fences = []
             for (const fence of fencesList) {
@@ -1392,6 +1515,32 @@ export default {
                 }
                 this.addModel()
             })
+        },
+        loadWindData (source) {
+            this.waitForMessages([source]).then(() => {
+                let dataExtractor = null
+                if (this.state.logType === 'tlog') {
+                    dataExtractor = MavlinkDataExtractor
+                } else if (this.state.logType === 'dji') {
+                    console.log('Using DJI extractor')
+                    dataExtractor = djiDataExtractor
+                } else {
+                    dataExtractor = DataflashDataExtractor
+                }
+                this.state.windData = dataExtractor.extractWindData(this.state.messages, source)
+                this.processWindData()
+            })
+        },
+        updateWindArrowPosition () {
+            if (!this.model) return
+
+            const arrowElement = document.getElementById('wind-arrow')
+            if (!arrowElement) return
+
+            arrowElement.style.transform = `rotate(${this.windVector.windDirection}deg)`
+            arrowElement.style.display = 'block'
+
+            this.viewer.scene.requestRender()
         }
     },
     computed: {
@@ -1469,6 +1618,14 @@ export default {
         },
         radioMode () {
             return this.state.radioMode
+        },
+        loadWindSource () {
+            return this.state.windData
+        },
+        windArrowStyle () {
+            return {
+                transform: `rotate(${this.windVector?.windDirection?.toFixed(1) || 0}deg)`
+            }
         }
     },
     watch: {
@@ -1484,6 +1641,7 @@ export default {
             if (!isNaN(value)) {
                 this.updateAndPlotTrajectory()
                 this.processTrajectory()
+                this.processWindData()
                 this.addModel()
                 this.viewer.scene.requestRender()
             }
@@ -1526,6 +1684,9 @@ export default {
         },
         attitudeSource () {
             this.loadAttitude(this.state.attitudeSource)
+        },
+        loadWindSource () {
+            this.loadWindData(this.state.windData)
         }
     }
 }
@@ -1537,6 +1698,82 @@ export default {
         display: flex;
         height: 100%;
     }
+
+    #wind-panel {
+        position: absolute;
+        bottom: 120px;
+        left: 10px;
+        width: 140px;
+        background: rgba(0, 0, 0, 0.7);
+        color: #eee;
+        font-family: 'Montserrat', sans-serif;
+        font-size: 9pt;
+        border-radius: 8px;
+        padding: 6px;
+        box-shadow: 2px 2px 10px rgba(0, 0, 0, 0.5);
+        z-index: 1000;
+    }
+
+    .wind-panel-header {
+        text-align: center;
+        font-size: 12px;
+        font-weight: bold;
+        margin-bottom: 10px;
+    }
+
+    .wind-panel-body {
+        display: flex;
+        align-items: center;
+        flex-direction: column;
+    }
+
+    .wind-arrow-container {
+        width: 50px;
+        height: 50px;
+        position: relative;
+    }
+
+    #wind-arrow {
+        width: 30px;
+        height: 30px;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpolygon points='50,10 90,90 50,70 10,90' fill='white'/%3E%3C/svg%3E");
+        background-size: contain;
+        background-repeat: no-repeat;
+        transform-origin: center;
+        transition: transform 0.3s ease;
+    }
+
+    .wind-info {
+        text-align: center;
+        font-size: 10px;
+        margin-top: 10px;
+    }
+
+    #gps-panel {
+          position: absolute;
+          bottom: 50px;
+          right: 10px;
+          width: 140px;
+          background: rgba(0, 0, 0, 0.7);
+          color: #eee;
+          font-family: 'Montserrat', sans-serif;
+          font-size: 9pt;
+          border-radius: 8px;
+          padding: 6px;
+          box-shadow: 2px 2px 10px rgba(0, 0, 0, 0.5);
+          z-index: 1000;
+        }
+
+    .gps-panel-header {
+          text-align: center;
+          font-size: 12px;
+          font-weight: bold;
+          margin-bottom: 10px;
+        }
+
+    .gps-panel-body p {
+          margin: 2px 0;
+        }
 
     #loadingOverlay h1 {
         text-align: center;

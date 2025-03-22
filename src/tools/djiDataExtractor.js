@@ -125,7 +125,42 @@ export class DjiDataExtractor {
                 }
             }
         }
+
         console.log('extractTrajectory', ret)
+        return ret
+    }
+
+    static extractWindData (messages, source) {
+        console.log('extractWindData', messages, source)
+        const ret = {}
+        if ('XKF2[0]' in messages && source === 'XKF2[0]') {
+            const windData = messages['XKF2[0]']
+            const windVectors = []
+            const windTimeSeries = {}
+
+            for (let i = 0; i < windData.time_boot_ms.length; i++) {
+                const time = windData.time_boot_ms[i]
+                const vwe = windData.VWE[i]
+                const vwn = windData.VWN[i]
+
+                // Wind vector calculate
+                let windVector = (Math.atan2(-vwe, -vwn) * (180 / Math.PI) + 360) % 360
+                if (windVector < 0) windVector += 360
+
+                const windSpeed = Math.sqrt(vwe * vwe + vwn * vwn)
+                if (vwe === 0 && vwn === 0 && windSpeed === 0) {
+                    windVector = 0
+                }
+
+                windVectors.push([vwe, vwn, windVector, time, windSpeed])
+                windTimeSeries[time] = { vwe, vwn, windVector, time, windSpeed }
+            }
+
+            if (windVectors.length > 0) {
+                ret.windVectors = windVectors
+                ret.windTimeSeries = windTimeSeries
+            }
+        }
         return ret
     }
 

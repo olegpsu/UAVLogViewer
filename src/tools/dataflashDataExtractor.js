@@ -455,6 +455,43 @@ export class DataflashDataExtractor {
         return ret
     }
 
+    static extractWindData (messages, source) {
+        console.log('extractWindData', messages, source)
+        const windData = {
+            timeSeries: [],
+            vectors: []
+        }
+
+        if ('XKF2[0]' in messages && source === 'XKF2[0]') {
+            const sourceData = messages[source]
+
+            for (let i = 0; i < sourceData.time_boot_ms.length; i++) {
+                const time = sourceData.time_boot_ms[i]
+                const vwe = sourceData.VWE[i] ?? 0
+                const vwn = sourceData.VWN[i] ?? 0
+                const windSpeed = Math.sqrt(vwe * vwe + vwn * vwn)
+
+                let windVector = (Math.atan2(-vwe, -vwn) * (180 / Math.PI) + 360) % 360
+                if (windVector < 0) windVector += 360
+                if (vwe === 0 && vwn === 0 && windSpeed === 0) {
+                    windVector = 0
+                }
+
+                windData.timeSeries.push({
+                    vwe: vwe,
+                    vwn: vwn,
+                    windVector: windVector,
+                    time: time,
+                    windSpeed: windSpeed
+                })
+
+                windData.vectors.push([vwe, vwn, windVector, time, windSpeed])
+            }
+        }
+
+        return windData
+    }
+
     static extractNamedValueFloatNames (_messages) {
         // this mechanism is not used for dataflash logs
         return []

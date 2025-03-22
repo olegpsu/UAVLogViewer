@@ -32,7 +32,7 @@
                 <div class="row" v-bind:class="[state.plotOn ? 'h-50' : 'h-100']"
                      v-if="state.mapAvailable && mapOk && state.showMap">
                     <div class="col-12 noPadding">
-                        <CesiumViewer ref="cesiumViewer"/>
+                        <CesiumViewer ref="cesiumViewer"  :windData="state.windData"/>
                     </div>
                 </div>
             </main>
@@ -169,6 +169,13 @@ export default {
                     console.log('unable to load trajectory')
                 }
             }
+
+            if ('XKF2[0]' in this.state.messages) {
+                console.log('Found XKF2[0], extracting wind data...')
+                this.state.windData = this.dataExtractor.extractWindData(this.state.messages, 'XKF2[0]')
+                console.log('Wind Data loaded: ', this.state.windData)
+            }
+
             try {
                 if (this.state.messages?.GPS?.time_boot_ms) {
                     this.state.metadata = { startTime: this.dataExtractor.extractStartTime(this.state.messages.GPS) }
