@@ -25,10 +25,10 @@
           <div id="wind-arrow" :style="windArrowStyle"></div>
         </div>
         <div v-if="windVector">
-          <p><strong>Wind direction:</strong> {{ windVector.windDirection?.toFixed(1) ?? 'N/A' }}°</p>
+          <p><strong>Wind direction:</strong> {{ windVector.windDirection?.toFixed(2) ?? 'N/A' }}°</p>
           <p><strong>Wind speed:</strong> {{ windVector.windSpeed?.toFixed(2) ?? 'N/A' }} m/s</p>
-          <p><strong>VWE:</strong> {{ windVector.vwe?.toFixed(1) ?? 'N/A' }} m/s</p>
-          <p><strong>VWN:</strong> {{ windVector.vwn?.toFixed(1) ?? 'N/A' }} m/s</p>
+          <p><strong>VWE:</strong> {{ windVector.vwe?.toFixed(2) ?? 'N/A' }} m/s</p>
+          <p><strong>VWN:</strong> {{ windVector.vwn?.toFixed(2) ?? 'N/A' }} m/s</p>
         </div>
       </div>
     </div>
